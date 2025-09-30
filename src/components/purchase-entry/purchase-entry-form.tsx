@@ -21,7 +21,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { format, startOfTomorrow } from 'date-fns';
-import { Calendar as CalendarIcon, Loader2, Upload, XCircle, PlusCircle, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Loader2, Upload, XCircle, PlusCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirebase } from '@/firebase';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -29,6 +29,7 @@ import { collection, addDoc } from 'firebase/firestore';
 import Image from 'next/image';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import type { Purchase } from '@/lib/types';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 
 
 const stockItemSchema = z.object({
@@ -51,10 +52,11 @@ const formSchema = z.object({
   stock: z.array(stockItemSchema).min(1, 'At least one stock item is required.'),
 }).refine((data) => {
     const sumOfStockWeights = data.stock.reduce((acc, item) => acc + (Number(item.totalWeight) || 0), 0);
-    return sumOfStockWeights <= data.totalWeight;
+    // Use a small tolerance for floating point comparisons
+    return sumOfStockWeights <= data.totalWeight + 0.001;
 }, {
     message: "The sum of weights for each stock item cannot exceed the total purchase weight.",
-    path: ["stock"], // You can associate the error with a specific field if you want
+    path: ["stock"],
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -133,59 +135,9 @@ export function PurchaseEntryForm() {
   }
 
   async function onSubmit(values: FormValues) {
-    setIsSubmitting(true);
-    if (!firestore || !user) {
-      toast({ variant: "destructive", title: "Error", description: "Authentication or database error." });
-      setIsSubmitting(false);
-      return;
-    }
-    
-    try {
-        let billPhotoUrl: string | null = null;
-        const file = values.billPhoto;
-
-        if (file instanceof File) {
-            const storage = getStorage();
-            const filePath = `purchases/bills/${Date.now()}-${file.name}`;
-            const fileRef = storageRef(storage, filePath);
-            await uploadBytes(fileRef, file);
-            billPhotoUrl = await getDownloadURL(fileRef);
-        }
-
-        const purchaseData: Omit<Purchase, 'id'> = {
-            date: values.date,
-            vendor: values.vendor,
-            totalCost: values.totalCost,
-            transportCost: values.transportCost || 0,
-            gst: values.gst || 0,
-            stock: values.stock.map(s => ({
-                size: s.size,
-                pieces: s.pieces,
-                weight: s.totalWeight,
-            })),
-            totalKg: values.totalWeight,
-            avgCostPerKg: avgCostPerKg,
-            billPhotoURL: billPhotoUrl,
-            createdAt: new Date(),
-            createdBy: user.uid
-        };
-
-        await addDoc(collection(firestore, 'purchases'), purchaseData);
-
-        toast({ title: '✅ Purchase Saved', description: 'The new purchase has been logged successfully.' });
-        form.reset();
-        remove(); // This will clear all stock items
-        append({ size: '18x24', weightPerSheet: 0, totalWeight: 0, pieces: 0 }); // Add a fresh one
-        setImagePreview(null);
-        const fileInput = document.getElementById('billPhoto') as HTMLInputElement;
-        if(fileInput) fileInput.value = '';
-
-    } catch (error) {
-        console.error("Error saving purchase:", error);
-        toast({ variant: "destructive", title: "⚠️ Error", description: "There was a problem saving the purchase." });
-    } finally {
-        setIsSubmitting(false);
-    }
+    // This function is currently disabled until backend is set up.
+    toast({ variant: "destructive", title: "Backend Not Configured", description: "Saving purchases requires backend setup." });
+    return;
   }
   
   const formatCurrency = (value: number) => {
@@ -375,7 +327,7 @@ export function PurchaseEntryForm() {
                     name="billPhoto"
                     render={() => (
                         <FormItem>
-                        <FormLabel>Bill Photo</FormLabel>
+                        <FormLabel>Bill Photo (Optional)</FormLabel>
                         <FormControl>
                             <div className="flex items-center justify-center w-full">
                                 <label htmlFor="billPhoto" className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer bg-muted hover:bg-muted/80">
@@ -416,9 +368,16 @@ export function PurchaseEntryForm() {
                 </div>
             </CardContent>
         </Card>
+        
+        <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Action Required</AlertTitle>
+            <AlertDescription>
+                Saving new purchases is currently disabled. The backend requires Firestore security rules and a Cloud Function to process new stock. Please contact your developer to complete the setup.
+            </AlertDescription>
+        </Alert>
 
-        <Button type="submit" className="w-full text-lg h-12" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        <Button type="submit" className="w-full text-lg h-12" disabled>
           Save Purchase
         </Button>
       </form>
