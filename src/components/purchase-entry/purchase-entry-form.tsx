@@ -44,6 +44,7 @@ const formSchema = z.object({
   }).max(startOfTomorrow(), { message: "Date cannot be in the future." }),
   vendor: z.string().min(1, 'Vendor name is required.'),
   totalCost: z.coerce.number().min(1, 'Total purchase cost is required.'),
+  totalWeight: z.coerce.number().min(1, 'Total weight is required.'),
   transportCost: z.coerce.number().min(0).optional(),
   gst: z.coerce.number().min(0).optional(),
   billPhoto: z.any().refine(file => file instanceof File, { message: 'Bill photo is required.' }),
@@ -64,6 +65,7 @@ export function PurchaseEntryForm() {
       date: new Date(),
       vendor: '',
       totalCost: 0,
+      totalWeight: 0,
       transportCost: 0,
       gst: 0,
       stock: [{ size: '18x24', weightPerSheet: 0, totalWeight: 0, pieces: 0 }],
@@ -98,19 +100,16 @@ export function PurchaseEntryForm() {
 
 
   const watchAllFields = useWatch({ control: form.control });
-  const { totalCost, transportCost, gst, stock } = watchAllFields;
-
-  const totalKg = useMemo(() => {
-    return (stock || []).reduce((acc, item) => acc + (Number(item.totalWeight) || 0), 0);
-  }, [stock]);
+  const { totalCost, transportCost, gst, totalWeight } = watchAllFields;
 
   const avgCostPerKg = useMemo(() => {
     const finalTotalCost = (Number(totalCost) || 0) + (Number(transportCost) || 0) + (Number(gst) || 0);
-    if (totalKg > 0) {
-      return finalTotalCost / totalKg;
+    const weight = Number(totalWeight) || 0;
+    if (weight > 0) {
+      return finalTotalCost / weight;
     }
     return 0;
-  }, [totalKg, totalCost, transportCost, gst]);
+  }, [totalCost, transportCost, gst, totalWeight]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -154,7 +153,7 @@ export function PurchaseEntryForm() {
                 pieces: s.pieces,
                 weight: s.totalWeight, // Map totalWeight to weight
             })),
-            totalKg: totalKg,
+            totalKg: values.totalWeight,
             avgCostPerKg: avgCostPerKg,
             billPhotoURL: billPhotoUrl,
             createdAt: new Date(),
@@ -236,6 +235,13 @@ export function PurchaseEntryForm() {
                     <FormItem>
                         <FormLabel>Total Purchase Cost (₹)</FormLabel>
                         <FormControl><Input type="number" placeholder="e.g., 140000" {...field} /></FormControl>
+                        <FormMessage />
+                    </FormItem>
+                )} />
+                <FormField control={form.control} name="totalWeight" render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Total Weight (Kg)</FormLabel>
+                        <FormControl><Input type="number" placeholder="e.g., 1000" {...field} /></FormControl>
                         <FormMessage />
                     </FormItem>
                 )} />
@@ -389,10 +395,10 @@ export function PurchaseEntryForm() {
                     </p>
                      <p className="text-sm font-medium text-muted-foreground mt-4">Total Weight</p>
                     <p className="text-2xl font-bold text-primary">
-                        {totalKg.toFixed(2)} Kg
+                        {Number(totalWeight).toFixed(2)} Kg
                     </p>
                     <p className="text-xs text-muted-foreground mt-2">
-                        Based on stock details entered
+                        Based on purchase details entered
                     </p>
                 </div>
             </CardContent>
@@ -406,5 +412,3 @@ export function PurchaseEntryForm() {
     </Form>
   );
 }
-
-    
