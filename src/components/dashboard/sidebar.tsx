@@ -9,6 +9,7 @@ import {
   Settings,
   PlusSquare,
   PackagePlus,
+  Warehouse,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,7 @@ const allNavItems = [
   { href: '/dashboard/sales-entry', icon: PlusSquare, label: 'Sales Entry', adminOnly: false },
   { href: '/dashboard/purchase-entry', icon: PackagePlus, label: 'Purchase Entry', adminOnly: true },
   { href: '/dashboard/entries', icon: ShoppingCart, label: 'All Entries', adminOnly: true },
+  { href: '/dashboard/inventory', icon: Warehouse, label: 'Inventory', adminOnly: true },
   { href: '/dashboard/reports', icon: FileText, label: 'Reports', adminOnly: true },
   { href: '/dashboard/settings', icon: Settings, label: 'Settings', adminOnly: true },
 ];
