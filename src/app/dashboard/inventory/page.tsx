@@ -1,9 +1,10 @@
+
 'use client';
 
 import { useRole } from '@/hooks/use-role';
 import { NotAuthorized } from '@/components/not-authorized';
 import { Skeleton } from '@/components/ui/skeleton';
-import { InventoryTable } from '@/components/inventory/inventory-table';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Warehouse } from 'lucide-react';
 
 export default function InventoryPage() {
@@ -35,11 +36,22 @@ export default function InventoryPage() {
             <div>
                 <h1 className="text-2xl md:text-3xl font-bold font-headline">Inventory Tracking</h1>
                 <p className="text-sm md:text-base text-muted-foreground">
-                    Live overview of your stock levels and value across all branches.
+                    Live overview of your stock levels and value.
                 </p>
             </div>
         </div>
-      <InventoryTable />
+        <Card>
+            <CardHeader>
+                <CardTitle>Feature Under Development</CardTitle>
+                <CardDescription>
+                    The inventory tracking system requires backend configuration.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <p>This page is currently being worked on. The backend needs to be set up with Cloud Functions to aggregate inventory data before this page can be displayed.</p>
+                <p className="mt-2 text-sm text-muted-foreground">Once the backend is ready, this page will show real-time stock levels, cost values, and potential profit across all branches.</p>
+            </CardContent>
+        </Card>
     </div>
   );
 }
