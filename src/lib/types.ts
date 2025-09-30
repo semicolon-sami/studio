@@ -50,7 +50,7 @@ export type Purchase = {
     stock: StockItem[];
     totalKg: number;
     avgCostPerKg: number;
-    billPhotoURL: string;
+    billPhotoURL: string | null;
     createdAt: any; // Firestore ServerTimestamp
     createdBy: string;
 }

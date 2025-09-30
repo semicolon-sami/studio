@@ -47,7 +47,7 @@ const formSchema = z.object({
   totalWeight: z.coerce.number().min(1, 'Total weight is required.'),
   transportCost: z.coerce.number().min(0).optional(),
   gst: z.coerce.number().min(0).optional(),
-  billPhoto: z.any().refine(file => file instanceof File, { message: 'Bill photo is required.' }),
+  billPhoto: z.any().optional(),
   stock: z.array(stockItemSchema).min(1, 'At least one stock item is required.'),
 }).refine((data) => {
     const sumOfStockWeights = data.stock.reduce((acc, item) => acc + (Number(item.totalWeight) || 0), 0);
@@ -141,12 +141,16 @@ export function PurchaseEntryForm() {
     }
     
     try {
-        const storage = getStorage();
-        const file = values.billPhoto as File;
-        const filePath = `purchases/bills/${Date.now()}-${file.name}`;
-        const fileRef = storageRef(storage, filePath);
-        await uploadBytes(fileRef, file);
-        const billPhotoUrl = await getDownloadURL(fileRef);
+        let billPhotoUrl: string | null = null;
+        const file = values.billPhoto;
+
+        if (file instanceof File) {
+            const storage = getStorage();
+            const filePath = `purchases/bills/${Date.now()}-${file.name}`;
+            const fileRef = storageRef(storage, filePath);
+            await uploadBytes(fileRef, file);
+            billPhotoUrl = await getDownloadURL(fileRef);
+        }
 
         const purchaseData: Omit<Purchase, 'id'> = {
             date: values.date,
@@ -157,7 +161,7 @@ export function PurchaseEntryForm() {
             stock: values.stock.map(s => ({
                 size: s.size,
                 pieces: s.pieces,
-                weight: s.totalWeight, // Map totalWeight to weight
+                weight: s.totalWeight,
             })),
             totalKg: values.totalWeight,
             avgCostPerKg: avgCostPerKg,
