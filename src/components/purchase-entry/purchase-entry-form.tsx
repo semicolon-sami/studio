@@ -68,8 +68,8 @@ export function PurchaseEntryForm() {
   const { totalKg, totalCost, transportCost, gst, sheetWeight18x24, sheetWeight24x30, sheetWeight30x40 } = watchAllFields;
 
   const avgCostPerKg = useMemo(() => {
-    const finalTotalKg = totalKg || 0;
-    const finalTotalCost = (totalCost || 0) + (transportCost || 0) + (gst || 0);
+    const finalTotalKg = Number(totalKg) || 0;
+    const finalTotalCost = (Number(totalCost) || 0) + (Number(transportCost) || 0) + (Number(gst) || 0);
     if (finalTotalKg > 0) {
       return finalTotalCost / finalTotalKg;
     }
@@ -77,11 +77,11 @@ export function PurchaseEntryForm() {
   }, [totalKg, totalCost, transportCost, gst]);
 
   const estimatedSheets = useMemo(() => {
-    const finalTotalKg = totalKg || 0;
+    const finalTotalKg = Number(totalKg) || 0;
     return {
-        '18x24': finalTotalKg > 0 && sheetWeight18x24 > 0 ? Math.floor(finalTotalKg / sheetWeight18x24) : 0,
-        '24x30': finalTotalKg > 0 && sheetWeight24x30 > 0 ? Math.floor(finalTotalKg / sheetWeight24x30) : 0,
-        '30x40': finalTotalKg > 0 && sheetWeight30x40 > 0 ? Math.floor(finalTotalKg / sheetWeight30x40) : 0,
+        '18x24': finalTotalKg > 0 && sheetWeight18x24 > 0 ? Math.floor(finalTotalKg / Number(sheetWeight18x24)) : 0,
+        '24x30': finalTotalKg > 0 && sheetWeight24x30 > 0 ? Math.floor(finalTotalKg / Number(sheetWeight24x30)) : 0,
+        '30x40': finalTotalKg > 0 && sheetWeight30x40 > 0 ? Math.floor(finalTotalKg / Number(sheetWeight30x40)) : 0,
     }
   }, [totalKg, sheetWeight18x24, sheetWeight24x30, sheetWeight30x40]);
 
