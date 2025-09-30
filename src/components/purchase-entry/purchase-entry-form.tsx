@@ -84,7 +84,7 @@ export function PurchaseEntryForm() {
         const weightPerSheet = Number(item.weightPerSheet) || 0;
         const totalWeight = Number(item.totalWeight) || 0;
         if (weightPerSheet > 0 && totalWeight > 0) {
-            const calculatedPieces = Math.ceil(totalWeight / weightPerSheet);
+            const calculatedPieces = Math.round(totalWeight / weightPerSheet);
             const currentPieces = form.getValues(`stock.${index}.pieces`);
             if(calculatedPieces !== currentPieces) {
                  form.setValue(`stock.${index}.pieces`, calculatedPieces, { shouldValidate: true });
@@ -412,3 +412,5 @@ export function PurchaseEntryForm() {
     </Form>
   );
 }
+
+    
