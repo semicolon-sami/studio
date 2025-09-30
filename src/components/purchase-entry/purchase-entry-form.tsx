@@ -1,8 +1,8 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useForm, useWatch, useFieldArray } from 'react-hook-form';
+import { useState, useMemo, useEffect } from 'react';
+import { useForm, useWatch, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import {
@@ -28,11 +28,14 @@ import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'fire
 import { collection, addDoc } from 'firebase/firestore';
 import Image from 'next/image';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import type { Purchase } from '@/lib/types';
+
 
 const stockItemSchema = z.object({
     size: z.string().min(1, 'Size is required.'),
+    weightPerSheet: z.coerce.number().min(0.01, 'Weight per sheet is required.'),
+    totalWeight: z.coerce.number().min(0.1, 'Total weight is required.'),
     pieces: z.coerce.number().min(1, 'Pieces must be at least 1.'),
-    weight: z.coerce.number().min(0.1, 'Weight is required.'),
 });
 
 const formSchema = z.object({
@@ -47,13 +50,15 @@ const formSchema = z.object({
   stock: z.array(stockItemSchema).min(1, 'At least one stock item is required.'),
 });
 
+type FormValues = z.infer<typeof formSchema>;
+
 export function PurchaseEntryForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const { toast } = useToast();
   const { firestore, user } = useFirebase();
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       date: new Date(),
@@ -61,7 +66,7 @@ export function PurchaseEntryForm() {
       totalCost: 0,
       transportCost: 0,
       gst: 0,
-      stock: [{ size: '18x24', pieces: 0, weight: 0 }],
+      stock: [{ size: '18x24', weightPerSheet: 0, totalWeight: 0, pieces: 0 }],
     },
   });
   
@@ -69,12 +74,34 @@ export function PurchaseEntryForm() {
     control: form.control,
     name: 'stock'
   });
+  
+  const watchedStock = useWatch({ control: form.control, name: 'stock' });
+
+  useEffect(() => {
+    watchedStock.forEach((item, index) => {
+        const weightPerSheet = Number(item.weightPerSheet) || 0;
+        const totalWeight = Number(item.totalWeight) || 0;
+        if (weightPerSheet > 0 && totalWeight > 0) {
+            const calculatedPieces = Math.ceil(totalWeight / weightPerSheet);
+            const currentPieces = form.getValues(`stock.${index}.pieces`);
+            if(calculatedPieces !== currentPieces) {
+                 form.setValue(`stock.${index}.pieces`, calculatedPieces, { shouldValidate: true });
+            }
+        } else {
+             const currentPieces = form.getValues(`stock.${index}.pieces`);
+             if (currentPieces !== 0) {
+                form.setValue(`stock.${index}.pieces`, 0, { shouldValidate: true });
+             }
+        }
+    });
+  }, [watchedStock, form]);
+
 
   const watchAllFields = useWatch({ control: form.control });
   const { totalCost, transportCost, gst, stock } = watchAllFields;
 
   const totalKg = useMemo(() => {
-    return (stock || []).reduce((acc, item) => acc + (Number(item.weight) || 0), 0);
+    return (stock || []).reduce((acc, item) => acc + (Number(item.totalWeight) || 0), 0);
   }, [stock]);
 
   const avgCostPerKg = useMemo(() => {
@@ -100,7 +127,7 @@ export function PurchaseEntryForm() {
     if(fileInput) fileInput.value = '';
   }
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+  async function onSubmit(values: FormValues) {
     setIsSubmitting(true);
     if (!firestore || !user) {
       toast({ variant: "destructive", title: "Error", description: "Authentication or database error." });
@@ -116,13 +143,17 @@ export function PurchaseEntryForm() {
         await uploadBytes(fileRef, file);
         const billPhotoUrl = await getDownloadURL(fileRef);
 
-        const purchaseData = {
+        const purchaseData: Omit<Purchase, 'id'> = {
             date: values.date,
             vendor: values.vendor,
             totalCost: values.totalCost,
             transportCost: values.transportCost || 0,
             gst: values.gst || 0,
-            stock: values.stock,
+            stock: values.stock.map(s => ({
+                size: s.size,
+                pieces: s.pieces,
+                weight: s.totalWeight, // Map totalWeight to weight
+            })),
             totalKg: totalKg,
             avgCostPerKg: avgCostPerKg,
             billPhotoURL: billPhotoUrl,
@@ -135,7 +166,7 @@ export function PurchaseEntryForm() {
         toast({ title: '✅ Purchase Saved', description: 'The new purchase has been logged successfully.' });
         form.reset();
         remove(); // This will clear all stock items
-        append({ size: '18x24', pieces: 0, weight: 0 }); // Add a fresh one
+        append({ size: '18x24', weightPerSheet: 0, totalWeight: 0, pieces: 0 }); // Add a fresh one
         setImagePreview(null);
         const fileInput = document.getElementById('billPhoto') as HTMLInputElement;
         if(fileInput) fileInput.value = '';
@@ -237,11 +268,11 @@ export function PurchaseEntryForm() {
             <Card>
                 <CardHeader>
                     <CardTitle>Stock Details</CardTitle>
-                    <CardDescription>Enter the actual pieces and total weight for each tarpaulin size in this purchase.</CardDescription>
+                    <CardDescription>Enter the weight for each tarpaulin size to auto-calculate pieces.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     {fields.map((item, index) => (
-                         <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end p-4 border rounded-lg">
+                         <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-end p-4 border rounded-lg">
                             <FormField
                                 control={form.control}
                                 name={`stock.${index}.size`}
@@ -267,22 +298,33 @@ export function PurchaseEntryForm() {
                             />
                              <FormField
                                 control={form.control}
-                                name={`stock.${index}.pieces`}
+                                name={`stock.${index}.weightPerSheet`}
                                 render={({ field }) => (
                                     <FormItem>
-                                        <FormLabel>No. of Pieces</FormLabel>
-                                        <FormControl><Input type="number" placeholder="e.g., 50" {...field} /></FormControl>
+                                        <FormLabel>Wt. per Sheet (Kg)</FormLabel>
+                                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 8.5" {...field} /></FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name={`stock.${index}.totalWeight`}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Total Weight (Kg)</FormLabel>
+                                        <FormControl><Input type="number" step="0.1" placeholder="e.g., 450" {...field} /></FormControl>
                                         <FormMessage />
                                     </FormItem>
                                 )}
                             />
                              <FormField
                                 control={form.control}
-                                name={`stock.${index}.weight`}
+                                name={`stock.${index}.pieces`}
                                 render={({ field }) => (
                                     <FormItem>
-                                        <FormLabel>Total Weight (Kg)</FormLabel>
-                                        <FormControl><Input type="number" placeholder="e.g., 450" {...field} /></FormControl>
+                                        <FormLabel>No. of Pieces</FormLabel>
+                                        <FormControl><Input type="number" {...field} readOnly className="bg-muted" /></FormControl>
                                         <FormMessage />
                                     </FormItem>
                                 )}
@@ -292,7 +334,7 @@ export function PurchaseEntryForm() {
                             </Button>
                          </div>
                     ))}
-                     <Button type="button" variant="outline" size="sm" onClick={() => append({ size: '18x24', pieces: 0, weight: 0 })}>
+                     <Button type="button" variant="outline" size="sm" onClick={() => append({ size: '18x24', weightPerSheet: 0, totalWeight: 0, pieces: 0 })}>
                         <PlusCircle className="mr-2 h-4 w-4" />
                         Add Another Size
                     </Button>
@@ -364,3 +406,5 @@ export function PurchaseEntryForm() {
     </Form>
   );
 }
+
+    
