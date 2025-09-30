@@ -49,6 +49,12 @@ const formSchema = z.object({
   gst: z.coerce.number().min(0).optional(),
   billPhoto: z.any().refine(file => file instanceof File, { message: 'Bill photo is required.' }),
   stock: z.array(stockItemSchema).min(1, 'At least one stock item is required.'),
+}).refine((data) => {
+    const sumOfStockWeights = data.stock.reduce((acc, item) => acc + (Number(item.totalWeight) || 0), 0);
+    return sumOfStockWeights <= data.totalWeight;
+}, {
+    message: "The sum of weights for each stock item cannot exceed the total purchase weight.",
+    path: ["stock"], // You can associate the error with a specific field if you want
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -344,8 +350,11 @@ export function PurchaseEntryForm() {
                         <PlusCircle className="mr-2 h-4 w-4" />
                         Add Another Size
                     </Button>
-                    {form.formState.errors.stock && (
+                    {form.formState.errors.stock && !form.formState.errors.stock.root && (
                         <p className="text-sm font-medium text-destructive">{form.formState.errors.stock.message}</p>
+                    )}
+                    {form.formState.errors.stock?.root && (
+                         <p className="text-sm font-medium text-destructive">{form.formState.errors.stock.root.message}</p>
                     )}
                 </CardContent>
             </Card>
@@ -412,5 +421,3 @@ export function PurchaseEntryForm() {
     </Form>
   );
 }
-
-    
