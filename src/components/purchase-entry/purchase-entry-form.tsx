@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useForm, useWatch } from 'react-hook-form';
+import { useForm, useWatch, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import {
@@ -21,26 +21,30 @@ import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { format, startOfTomorrow } from 'date-fns';
-import { Calendar as CalendarIcon, Loader2, Upload, XCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Loader2, Upload, XCircle, PlusCircle, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirebase } from '@/firebase';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc } from 'firebase/firestore';
 import Image from 'next/image';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+
+const stockItemSchema = z.object({
+    size: z.string().min(1, 'Size is required.'),
+    pieces: z.coerce.number().min(1, 'Pieces must be at least 1.'),
+    weight: z.coerce.number().min(0.1, 'Weight is required.'),
+});
 
 const formSchema = z.object({
   date: z.date({
     required_error: 'A date is required.',
   }).max(startOfTomorrow(), { message: "Date cannot be in the future." }),
   vendor: z.string().min(1, 'Vendor name is required.'),
-  totalKg: z.coerce.number().min(0.01, 'Total Kg must be greater than 0.'),
   totalCost: z.coerce.number().min(1, 'Total purchase cost is required.'),
   transportCost: z.coerce.number().min(0).optional(),
   gst: z.coerce.number().min(0).optional(),
   billPhoto: z.any().refine(file => file instanceof File, { message: 'Bill photo is required.' }),
-  sheetWeight18x24: z.coerce.number().min(0.01, 'Weight is required.'),
-  sheetWeight24x30: z.coerce.number().min(0.01, 'Weight is required.'),
-  sheetWeight30x40: z.coerce.number().min(0.01, 'Weight is required.'),
+  stock: z.array(stockItemSchema).min(1, 'At least one stock item is required.'),
 });
 
 export function PurchaseEntryForm() {
@@ -54,37 +58,32 @@ export function PurchaseEntryForm() {
     defaultValues: {
       date: new Date(),
       vendor: '',
-      totalKg: 0,
       totalCost: 0,
       transportCost: 0,
       gst: 0,
-      sheetWeight18x24: 0,
-      sheetWeight24x30: 0,
-      sheetWeight30x40: 0,
+      stock: [{ size: '18x24', pieces: 0, weight: 0 }],
     },
+  });
+  
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: 'stock'
   });
 
   const watchAllFields = useWatch({ control: form.control });
-  const { totalKg, totalCost, transportCost, gst, sheetWeight18x24, sheetWeight24x30, sheetWeight30x40 } = watchAllFields;
+  const { totalCost, transportCost, gst, stock } = watchAllFields;
+
+  const totalKg = useMemo(() => {
+    return (stock || []).reduce((acc, item) => acc + (Number(item.weight) || 0), 0);
+  }, [stock]);
 
   const avgCostPerKg = useMemo(() => {
-    const finalTotalKg = Number(totalKg) || 0;
     const finalTotalCost = (Number(totalCost) || 0) + (Number(transportCost) || 0) + (Number(gst) || 0);
-    if (finalTotalKg > 0) {
-      return finalTotalCost / finalTotalKg;
+    if (totalKg > 0) {
+      return finalTotalCost / totalKg;
     }
     return 0;
   }, [totalKg, totalCost, transportCost, gst]);
-
-  const estimatedSheets = useMemo(() => {
-    const finalTotalKg = Number(totalKg) || 0;
-    return {
-        '18x24': finalTotalKg > 0 && sheetWeight18x24 > 0 ? Math.floor(finalTotalKg / Number(sheetWeight18x24)) : 0,
-        '24x30': finalTotalKg > 0 && sheetWeight24x30 > 0 ? Math.floor(finalTotalKg / Number(sheetWeight24x30)) : 0,
-        '30x40': finalTotalKg > 0 && sheetWeight30x40 > 0 ? Math.floor(finalTotalKg / Number(sheetWeight30x40)) : 0,
-    }
-  }, [totalKg, sheetWeight18x24, sheetWeight24x30, sheetWeight30x40]);
-
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -110,7 +109,6 @@ export function PurchaseEntryForm() {
     }
     
     try {
-        // 1. Upload image to Firebase Storage
         const storage = getStorage();
         const file = values.billPhoto as File;
         const filePath = `purchases/bills/${Date.now()}-${file.name}`;
@@ -118,35 +116,29 @@ export function PurchaseEntryForm() {
         await uploadBytes(fileRef, file);
         const billPhotoUrl = await getDownloadURL(fileRef);
 
-        // 2. Prepare data for Firestore
         const purchaseData = {
             date: values.date,
             vendor: values.vendor,
-            totalKg: values.totalKg,
             totalCost: values.totalCost,
             transportCost: values.transportCost || 0,
             gst: values.gst || 0,
-            sheetWeights: {
-                '18x24': values.sheetWeight18x24,
-                '24x30': values.sheetWeight24x30,
-                '30x40': values.sheetWeight30x40,
-            },
-            estimatedSheets: estimatedSheets,
+            stock: values.stock,
+            totalKg: totalKg,
             avgCostPerKg: avgCostPerKg,
             billPhotoURL: billPhotoUrl,
             createdAt: new Date(),
             createdBy: user.uid
         };
 
-        // 3. Save data to Firestore
         await addDoc(collection(firestore, 'purchases'), purchaseData);
 
         toast({ title: '✅ Purchase Saved', description: 'The new purchase has been logged successfully.' });
         form.reset();
+        remove(); // This will clear all stock items
+        append({ size: '18x24', pieces: 0, weight: 0 }); // Add a fresh one
         setImagePreview(null);
-         const fileInput = document.getElementById('billPhoto') as HTMLInputElement;
+        const fileInput = document.getElementById('billPhoto') as HTMLInputElement;
         if(fileInput) fileInput.value = '';
-
 
     } catch (error) {
         console.error("Error saving purchase:", error);
@@ -168,65 +160,57 @@ export function PurchaseEntryForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <Card>
-            <CardHeader>
-              <CardTitle>Purchase Details</CardTitle>
-              <CardDescription>Enter the main details of the purchase.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FormField
-                control={form.control}
-                name="date"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Date of Purchase</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={'outline'}
-                            className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
-                          >
-                            {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date > new Date()} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField control={form.control} name="vendor" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Vendor Name / Source</FormLabel>
-                    <FormControl><Input placeholder="e.g., ABC Tarpaulin Co." {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-              )} />
-              <FormField control={form.control} name="totalKg" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Total Kg Bought</FormLabel>
-                    <FormControl><Input type="number" placeholder="e.g., 1000" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-              )} />
-               <FormField control={form.control} name="totalCost" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Total Purchase Cost (₹)</FormLabel>
-                    <FormControl><Input type="number" placeholder="e.g., 140000" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-              )} />
-            </CardContent>
-          </Card>
-
-          <div className="space-y-8">
-             <Card>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1 space-y-8">
+            <Card>
+                <CardHeader>
+                <CardTitle>Purchase Details</CardTitle>
+                <CardDescription>Enter the main details of the purchase.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                <FormField
+                    control={form.control}
+                    name="date"
+                    render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                        <FormLabel>Date of Purchase</FormLabel>
+                        <Popover>
+                        <PopoverTrigger asChild>
+                            <FormControl>
+                            <Button
+                                variant={'outline'}
+                                className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
+                            >
+                                {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                            </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date > new Date()} initialFocus />
+                        </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                    </FormItem>
+                    )}
+                />
+                <FormField control={form.control} name="vendor" render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Vendor Name / Source</FormLabel>
+                        <FormControl><Input placeholder="e.g., ABC Tarpaulin Co." {...field} /></FormControl>
+                        <FormMessage />
+                    </FormItem>
+                )} />
+                <FormField control={form.control} name="totalCost" render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Total Purchase Cost (₹)</FormLabel>
+                        <FormControl><Input type="number" placeholder="e.g., 140000" {...field} /></FormControl>
+                        <FormMessage />
+                    </FormItem>
+                )} />
+                </CardContent>
+            </Card>
+            <Card>
                 <CardHeader>
                     <CardTitle>Additional Costs</CardTitle>
                 </CardHeader>
@@ -234,49 +218,87 @@ export function PurchaseEntryForm() {
                     <FormField control={form.control} name="transportCost" render={({ field }) => (
                         <FormItem>
                             <FormLabel>Transport Cost (₹) (Optional)</FormLabel>
-                            <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
+                            <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
                             <FormMessage />
                         </FormItem>
                     )} />
                     <FormField control={form.control} name="gst" render={({ field }) => (
                         <FormItem>
                             <FormLabel>GST / Taxes (₹) (Optional)</FormLabel>
-                            <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
+                            <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
                             <FormMessage />
                         </FormItem>
                     )} />
                 </CardContent>
             </Card>
+          </div>
+
+          <div className="lg:col-span-2">
             <Card>
                 <CardHeader>
-                    <CardTitle>Sheet Weight Mapping</CardTitle>
-                    <CardDescription>Enter the weight in Kg for a single sheet of each size.</CardDescription>
+                    <CardTitle>Stock Details</CardTitle>
+                    <CardDescription>Enter the actual pieces and total weight for each tarpaulin size in this purchase.</CardDescription>
                 </CardHeader>
-                <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                     <FormField control={form.control} name="sheetWeight18x24" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>18x24</FormLabel>
-                            <FormControl><Input type="number" placeholder="e.g. 9" {...field} /></FormControl>
-                            <FormDescription className="text-xs">Est. {estimatedSheets['18x24']} sheets</FormDescription>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                     <FormField control={form.control} name="sheetWeight24x30" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>24x30</FormLabel>
-                            <FormControl><Input type="number" placeholder="e.g. 12" {...field} /></FormControl>
-                             <FormDescription className="text-xs">Est. {estimatedSheets['24x30']} sheets</FormDescription>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                     <FormField control={form.control} name="sheetWeight30x40" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>30x40</FormLabel>
-                            <FormControl><Input type="number" placeholder="e.g. 15" {...field} /></FormControl>
-                             <FormDescription className="text-xs">Est. {estimatedSheets['30x40']} sheets</FormDescription>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
+                <CardContent className="space-y-4">
+                    {fields.map((item, index) => (
+                         <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end p-4 border rounded-lg">
+                            <FormField
+                                control={form.control}
+                                name={`stock.${index}.size`}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Size</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select a size" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="18x24">18 x 24</SelectItem>
+                                                <SelectItem value="24x30">24 x 30</SelectItem>
+                                                <SelectItem value="30x40">30 x 40</SelectItem>
+                                                <SelectItem value="other">Other</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                             <FormField
+                                control={form.control}
+                                name={`stock.${index}.pieces`}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>No. of Pieces</FormLabel>
+                                        <FormControl><Input type="number" placeholder="e.g., 50" {...field} /></FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                             <FormField
+                                control={form.control}
+                                name={`stock.${index}.weight`}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Total Weight (Kg)</FormLabel>
+                                        <FormControl><Input type="number" placeholder="e.g., 450" {...field} /></FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <Button type="button" variant="destructive" size="icon" onClick={() => remove(index)} disabled={fields.length <= 1}>
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                         </div>
+                    ))}
+                     <Button type="button" variant="outline" size="sm" onClick={() => append({ size: '18x24', pieces: 0, weight: 0 })}>
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        Add Another Size
+                    </Button>
+                    {form.formState.errors.stock && (
+                        <p className="text-sm font-medium text-destructive">{form.formState.errors.stock.message}</p>
+                    )}
                 </CardContent>
             </Card>
           </div>
@@ -323,8 +345,12 @@ export function PurchaseEntryForm() {
                     <p className="text-4xl font-bold font-headline text-primary">
                         {formatCurrency(avgCostPerKg)}
                     </p>
+                     <p className="text-sm font-medium text-muted-foreground mt-4">Total Weight</p>
+                    <p className="text-2xl font-bold text-primary">
+                        {totalKg.toFixed(2)} Kg
+                    </p>
                     <p className="text-xs text-muted-foreground mt-2">
-                        (Total Cost + Transport + GST) / Total Kg
+                        Based on stock details entered
                     </p>
                 </div>
             </CardContent>

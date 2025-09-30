@@ -34,19 +34,21 @@ export type SalesEntry = {
   syncStatus: 'pending' | 'synced' | 'failed';
 }
 
+export type StockItem = {
+    size: string;
+    pieces: number;
+    weight: number;
+}
+
 export type Purchase = {
     id: string;
     date: Date;
     vendor: string;
-    totalKg: number;
     totalCost: number;
-    transportCost: number;
-    gst: number;
-    sheetWeights: {
-        '18x24': number;
-        '24x30': number;
-        '30x40': number;
-    };
+    transportCost?: number;
+    gst?: number;
+    stock: StockItem[];
+    totalKg: number;
     avgCostPerKg: number;
     billPhotoURL: string;
     createdAt: any; // Firestore ServerTimestamp
